@@ -40,6 +40,7 @@ from database import (
     TxType,
     add_transaction,
     get_balance,
+    get_monthly_totals,
     get_or_create_user,
     init_db,
 )
@@ -108,11 +109,21 @@ async def cmd_start(message: Message) -> None:
 
 @router.message(Command("balance"))
 async def cmd_balance(message: Message) -> None:
-    """Return the user's current balance as text."""
+    """Return the user's balance plus this month's income/expense as text."""
+    import datetime as dt
+
+    today = dt.date.today()
     async with AsyncSessionLocal() as session:
         balance = await get_balance(session, message.from_user.id)
+        income, expense = await get_monthly_totals(
+            session, message.from_user.id, today.year, today.month
+        )
+
     await message.answer(
-        f"💰 Joriy balansingiz: <b>{_fmt_money(balance)}</b>",
+        f"💰 <b>Joriy balans:</b> {_fmt_money(balance)}\n\n"
+        f"📅 <b>Bu oy ({today:%Y-%m}):</b>\n"
+        f"🟢 Kirim:  <b>{_fmt_money(income)}</b>\n"
+        f"🔴 Chiqim: <b>{_fmt_money(expense)}</b>",
         reply_markup=_web_app_keyboard(),
     )
 

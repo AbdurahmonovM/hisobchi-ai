@@ -41,6 +41,7 @@ from config import settings
 from database import (
     get_balance,
     get_expense_breakdown,
+    get_monthly_totals,
     get_recent_transactions,
     get_session,
     init_db,
@@ -133,6 +134,7 @@ async def api_summary(
     today = dt.date.today()
 
     balance = await get_balance(session, user_id)
+    income, expense = await get_monthly_totals(session, user_id, today.year, today.month)
     breakdown = await get_expense_breakdown(session, user_id, today.year, today.month)
     recent = await get_recent_transactions(session, user_id, limit=15)
 
@@ -140,6 +142,8 @@ async def api_summary(
         "currency": settings.DEFAULT_CURRENCY,
         "balance": float(balance),
         "month": today.strftime("%Y-%m"),
+        "monthly_income": float(income),
+        "monthly_expense": float(expense),
         "expenses_by_category": [
             {"category": cat, "amount": float(total)} for cat, total in breakdown
         ],

@@ -242,3 +242,29 @@ async def get_expense_breakdown(
         .order_by(func.sum(Transaction.amount).desc())
     )
     return [(cat, Decimal(total)) for cat, total in rows.all()]
+
+
+async def get_monthly_totals(
+    session: AsyncSession, user_id: int, year: int, month: int
+) -> tuple[Decimal, Decimal]:
+    """Return (income, expense) totals for a given month."""
+    start = dt.date(year, month, 1)
+    end = dt.date(year + (month == 12), (month % 12) + 1, 1)  # first day of next month
+
+    income = await session.scalar(
+        select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+            Transaction.user_id == user_id,
+            Transaction.type == TxType.income,
+            Transaction.tx_date >= start,
+            Transaction.tx_date < end,
+        )
+    )
+    expense = await session.scalar(
+        select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+            Transaction.user_id == user_id,
+            Transaction.type == TxType.expense,
+            Transaction.tx_date >= start,
+            Transaction.tx_date < end,
+        )
+    )
+    return Decimal(income or 0), Decimal(expense or 0)

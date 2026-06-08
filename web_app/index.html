@@ -5,62 +5,114 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Hisobchi AI</title>
 
-  <!-- Telegram Web App SDK: gives us window.Telegram.WebApp (theme, initData, ...) -->
+  <!-- Telegram Web App SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <!-- TailwindCSS via CDN (fine for a small embedded Web App) -->
+  <!-- TailwindCSS via CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Chart.js for the expense pie chart -->
+  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 
   <style>
-    /* Map Telegram's theme params onto CSS variables so the UI auto-themes
-       to the user's light/dark Telegram. Sensible fallbacks for browsers. */
+    /* Map Telegram theme params -> CSS variables (auto light/dark). */
     :root {
-      --bg: var(--tg-theme-bg-color, #ffffff);
-      --text: var(--tg-theme-text-color, #1a1a1a);
-      --hint: var(--tg-theme-hint-color, #8a8a8e);
-      --card: var(--tg-theme-secondary-bg-color, #f3f4f6);
-      --accent: var(--tg-theme-button-color, #2563eb);
+      --bg:     var(--tg-theme-bg-color, #0f1115);
+      --text:   var(--tg-theme-text-color, #f5f6f8);
+      --hint:   var(--tg-theme-hint-color, #8a909c);
+      --card:   var(--tg-theme-secondary-bg-color, #1a1d24);
+      --accent: var(--tg-theme-button-color, #3b82f6);
       --accent-text: var(--tg-theme-button-text-color, #ffffff);
+      --green: #22c55e;
+      --red:   #ef4444;
     }
-    body { background: var(--bg); color: var(--text); }
+    * { -webkit-tap-highlight-color: transparent; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
     .card { background: var(--card); }
     .hint { color: var(--hint); }
+
+    /* Gradient hero for the balance */
+    .hero {
+      background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 50%, #06b6d4 100%);
+      box-shadow: 0 12px 30px -10px rgba(59,130,246,.55);
+    }
+
     /* Skeleton shimmer while loading */
     .shimmer {
-      background: linear-gradient(90deg, rgba(128,128,128,.12) 25%, rgba(128,128,128,.22) 37%, rgba(128,128,128,.12) 63%);
-      background-size: 400% 100%; animation: shimmer 1.4s ease infinite;
+      background: linear-gradient(90deg, rgba(128,128,128,.12) 25%, rgba(128,128,128,.24) 37%, rgba(128,128,128,.12) 63%);
+      background-size: 400% 100%; animation: shimmer 1.4s ease infinite; border-radius: .5rem;
     }
     @keyframes shimmer { 0% { background-position: 100% 0 } 100% { background-position: -100% 0 } }
+
+    /* Entrance animation */
+    .reveal { opacity: 0; transform: translateY(8px); animation: reveal .45s ease forwards; }
+    @keyframes reveal { to { opacity: 1; transform: none } }
+
+    .tap { transition: transform .12s ease; }
+    .tap:active { transform: scale(.96); }
   </style>
 </head>
 
 <body class="min-h-screen antialiased">
-  <main class="max-w-md mx-auto px-4 py-5">
+  <main class="max-w-md mx-auto px-4 pt-4 pb-8">
 
     <!-- Header -->
-    <header class="flex items-center justify-between mb-5">
-      <div>
-        <h1 class="text-xl font-bold">💰 Hisobchi AI</h1>
-        <p class="hint text-xs" id="month-label">Yuklanmoqda...</p>
+    <header class="flex items-center justify-between mb-4">
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl hero flex items-center justify-center text-lg">💰</div>
+        <div>
+          <h1 class="text-base font-bold leading-tight">Hisobchi AI</h1>
+          <p class="hint text-[11px]" id="month-label">Yuklanmoqda…</p>
+        </div>
       </div>
-      <button id="refresh-btn" class="text-sm px-3 py-1.5 rounded-lg"
-              style="background: var(--accent); color: var(--accent-text);">
-        ↻ Yangilash
+      <button id="refresh-btn" class="tap w-9 h-9 rounded-xl card flex items-center justify-center text-lg" aria-label="Yangilash">
+        ↻
       </button>
     </header>
 
-    <!-- Balance card -->
-    <section class="card rounded-2xl p-5 mb-5 shadow-sm">
-      <p class="hint text-xs uppercase tracking-wide mb-1">Joriy balans</p>
-      <p id="balance" class="text-3xl font-extrabold shimmer rounded h-9 w-40">&nbsp;</p>
+    <!-- Balance hero -->
+    <section class="hero rounded-3xl p-5 mb-4 text-white reveal">
+      <p class="text-xs/none opacity-80 mb-2">Joriy balans</p>
+      <p id="balance" class="text-[2rem] font-extrabold tracking-tight shimmer h-9 w-44">&nbsp;</p>
+      <div class="flex items-center gap-1.5 mt-2 text-xs opacity-90">
+        <span id="balance-sub">Hisobingiz holati</span>
+      </div>
+    </section>
+
+    <!-- ===== ASOSIY QISM: oylik kirim / chiqim ===== -->
+    <section class="grid grid-cols-2 gap-3 mb-4">
+      <div class="card rounded-2xl p-4 reveal" style="animation-delay:.05s">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-7 h-7 rounded-lg flex items-center justify-center text-sm"
+                style="background:rgba(34,197,94,.15); color:var(--green)">↓</span>
+          <span class="hint text-xs">Bu oy kirim</span>
+        </div>
+        <p id="m-income" class="text-lg font-bold shimmer h-6 w-24" style="color:var(--green)">&nbsp;</p>
+      </div>
+
+      <div class="card rounded-2xl p-4 reveal" style="animation-delay:.1s">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-7 h-7 rounded-lg flex items-center justify-center text-sm"
+                style="background:rgba(239,68,68,.15); color:var(--red)">↑</span>
+          <span class="hint text-xs">Bu oy chiqim</span>
+        </div>
+        <p id="m-expense" class="text-lg font-bold shimmer h-6 w-24" style="color:var(--red)">&nbsp;</p>
+      </div>
     </section>
 
     <!-- Expense pie chart -->
-    <section class="card rounded-2xl p-5 mb-5 shadow-sm">
-      <h2 class="font-semibold mb-3">Bu oy xarajatlari</h2>
-      <div class="relative" style="height: 240px;">
+    <section class="card rounded-2xl p-5 mb-4 reveal" style="animation-delay:.15s">
+      <h2 class="font-semibold mb-1 text-sm">Xarajatlar taqsimoti</h2>
+      <p class="hint text-[11px] mb-3">Bu oy, kategoriya bo'yicha</p>
+      <div class="relative" style="height: 230px;">
         <canvas id="expense-chart"></canvas>
+        <!-- Center total overlay -->
+        <div id="chart-center" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none hidden">
+          <span class="hint text-[10px] uppercase tracking-wide">Jami chiqim</span>
+          <span id="chart-total" class="font-bold text-base"></span>
+        </div>
       </div>
       <p id="no-expenses" class="hint text-sm text-center mt-4 hidden">
         Bu oy hali xarajatlar yo'q.
@@ -68,32 +120,37 @@
     </section>
 
     <!-- Recent transactions -->
-    <section class="card rounded-2xl p-5 shadow-sm">
-      <h2 class="font-semibold mb-3">So'nggi tranzaksiyalar</h2>
-      <ul id="tx-list" class="divide-y divide-black/5"></ul>
-      <p id="no-tx" class="hint text-sm text-center py-4 hidden">
-        Hali tranzaksiyalar yo'q. Botga ovozli xabar yuboring!
+    <section class="card rounded-2xl p-5 reveal" style="animation-delay:.2s">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-sm">So'nggi amallar</h2>
+        <span id="tx-count" class="hint text-[11px]"></span>
+      </div>
+      <ul id="tx-list" class="space-y-1"></ul>
+      <p id="no-tx" class="hint text-sm text-center py-6 hidden">
+        Hali amallar yo'q.<br>Botga ovozli xabar yuboring 🎙️
       </p>
     </section>
 
-    <button id="close-btn" class="w-full mt-5 py-3 rounded-xl font-medium"
+    <button id="close-btn" class="tap w-full mt-5 py-3.5 rounded-2xl font-semibold text-sm"
             style="background: var(--accent); color: var(--accent-text);">
       Yopish
     </button>
+
+    <p class="hint text-center text-[10px] mt-4">Hisobchi AI · ovozli moliya yordamchisi</p>
   </main>
 
   <script>
-    // -------------------------------------------------------------------
-    // Telegram Web App bootstrap
-    // -------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Telegram bootstrap
+    // ------------------------------------------------------------------
     const tg = window.Telegram?.WebApp;
     if (tg) {
-      tg.ready();                 // tell Telegram we're loaded
-      tg.expand();                // use full height
-      tg.setHeaderColor?.('secondary_bg_color');
+      tg.ready();
+      tg.expand();
+      tg.setHeaderColor?.('bg_color');
+      tg.setBackgroundColor?.('bg_color');
     }
 
-    // Category -> emoji + friendly Uzbek label for the UI.
     const CATEGORY_META = {
       food:          { icon: '🍽️', label: 'Ovqat' },
       transport:     { icon: '🚕', label: 'Transport' },
@@ -110,102 +167,105 @@
 
     let chart = null;
 
-    function fmtMoney(value, currency) {
-      // 1 234 567 style grouping, no decimals.
-      return new Intl.NumberFormat('uz-UZ', { maximumFractionDigits: 0 })
-        .format(value) + ' ' + currency;
+    function fmtMoney(v, currency) {
+      return new Intl.NumberFormat('uz-UZ', { maximumFractionDigits: 0 }).format(v || 0) + ' ' + currency;
+    }
+    function fmtCompact(v, currency) {
+      const a = Math.abs(v || 0);
+      if (a >= 1e9) return (v/1e9).toFixed(1).replace('.0','') + ' mlrd ' + currency;
+      if (a >= 1e6) return (v/1e6).toFixed(1).replace('.0','') + ' mln ' + currency;
+      return fmtMoney(v, currency);
     }
 
-    // -------------------------------------------------------------------
-    // Data fetch — initData goes in the Authorization header so the server
-    // can verify the signature and trust the user id (see web_app_server.py).
-    // -------------------------------------------------------------------
     async function fetchSummary() {
       const initData = tg?.initData || '';
-      const res = await fetch('/api/summary', {
-        headers: { 'Authorization': 'tma ' + initData },
-      });
-      if (!res.ok) throw new Error('API error ' + res.status);
+      const res = await fetch('/api/summary', { headers: { 'Authorization': 'tma ' + initData } });
+      if (!res.ok) throw new Error('API ' + res.status);
       return res.json();
     }
 
-    function renderBalance(balance, currency) {
-      const el = document.getElementById('balance');
-      el.classList.remove('shimmer');
-      el.textContent = fmtMoney(balance, currency);
-      el.style.color = balance >= 0 ? '' : '#ef4444';
+    function unshimmer(el) { el.classList.remove('shimmer'); el.classList.remove('h-6','h-9','w-24','w-44'); }
+
+    function renderTop(d) {
+      const b = document.getElementById('balance');
+      unshimmer(b);
+      b.textContent = fmtMoney(d.balance, d.currency);
+      document.getElementById('balance-sub').textContent =
+        d.balance >= 0 ? '👍 Musbat balans' : '⚠️ Manfiy balans';
+
+      const inc = document.getElementById('m-income');
+      const exp = document.getElementById('m-expense');
+      unshimmer(inc); unshimmer(exp);
+      inc.textContent = fmtCompact(d.monthly_income, d.currency);
+      exp.textContent = fmtCompact(d.monthly_expense, d.currency);
     }
 
     function renderChart(expenses, currency) {
       const canvas = document.getElementById('expense-chart');
       const empty = document.getElementById('no-expenses');
+      const center = document.getElementById('chart-center');
 
       if (!expenses.length) {
         empty.classList.remove('hidden');
         canvas.classList.add('hidden');
+        center.classList.add('hidden');
         return;
       }
       empty.classList.add('hidden');
       canvas.classList.remove('hidden');
+      center.classList.remove('hidden');
 
-      const palette = ['#2563eb','#16a34a','#f59e0b','#ef4444','#8b5cf6',
+      const palette = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6',
                        '#06b6d4','#ec4899','#84cc16','#f97316','#64748b'];
-
       const labels = expenses.map(e => meta(e.category).icon + ' ' + meta(e.category).label);
       const data = expenses.map(e => e.amount);
+      const total = data.reduce((s, x) => s + x, 0);
+      document.getElementById('chart-total').textContent = fmtCompact(total, currency);
 
       if (chart) chart.destroy();
       chart = new Chart(canvas, {
         type: 'doughnut',
-        data: {
-          labels,
-          datasets: [{ data, backgroundColor: palette, borderWidth: 0 }],
-        },
+        data: { labels, datasets: [{ data, backgroundColor: palette, borderWidth: 0, hoverOffset: 6 }] },
         options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          cutout: '62%',
+          responsive: true, maintainAspectRatio: false, cutout: '70%',
           plugins: {
-            legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } },
-            tooltip: {
-              callbacks: {
-                label: (ctx) => ' ' + fmtMoney(ctx.parsed, currency),
-              },
-            },
+            legend: { position: 'bottom', labels: { color: getComputedStyle(document.body).color,
+                      boxWidth: 10, boxHeight: 10, padding: 12, font: { size: 11 } } },
+            tooltip: { callbacks: { label: (c) => ' ' + fmtMoney(c.parsed, currency) } },
           },
         },
       });
     }
 
-    function renderTransactions(transactions, currency) {
+    function renderTransactions(txs, currency) {
       const list = document.getElementById('tx-list');
       const empty = document.getElementById('no-tx');
+      const count = document.getElementById('tx-count');
       list.innerHTML = '';
 
-      if (!transactions.length) {
-        empty.classList.remove('hidden');
-        return;
-      }
+      if (!txs.length) { empty.classList.remove('hidden'); count.textContent = ''; return; }
       empty.classList.add('hidden');
+      count.textContent = txs.length + ' ta';
 
-      for (const t of transactions) {
+      for (const t of txs) {
         const m = meta(t.category);
         const isIncome = t.type === 'income';
         const sign = isIncome ? '+' : (t.type === 'expense' ? '−' : '');
-        const color = isIncome ? '#16a34a' : (t.type === 'expense' ? '#ef4444' : '#6b7280');
+        const color = isIncome ? 'var(--green)' : (t.type === 'expense' ? 'var(--red)' : 'var(--hint)');
 
         const li = document.createElement('li');
-        li.className = 'flex items-center justify-between py-3';
+        li.className = 'flex items-center justify-between py-2.5 px-1 rounded-xl';
         li.innerHTML = `
           <div class="flex items-center gap-3 min-w-0">
-            <span class="text-xl">${m.icon}</span>
+            <span class="w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0"
+                  style="background:rgba(128,128,128,.12)">${m.icon}</span>
             <div class="min-w-0">
-              <p class="font-medium truncate">${t.description || m.label}</p>
-              <p class="hint text-xs">${m.label} • ${t.date}</p>
+              <p class="font-medium text-sm truncate">${t.description || m.label}</p>
+              <p class="hint text-[11px]">${m.label} · ${t.date}</p>
             </div>
           </div>
-          <span class="font-semibold whitespace-nowrap" style="color:${color}">
-            ${sign}${fmtMoney(t.amount, currency)}
+          <span class="font-semibold text-sm whitespace-nowrap" style="color:${color}">
+            ${sign}${fmtCompact(t.amount, currency)}
           </span>`;
         list.appendChild(li);
       }
@@ -213,27 +273,29 @@
 
     async function load() {
       try {
-        const data = await fetchSummary();
-        document.getElementById('month-label').textContent = 'Hisobot • ' + data.month;
-        renderBalance(data.balance, data.currency);
-        renderChart(data.expenses_by_category, data.currency);
-        renderTransactions(data.transactions, data.currency);
+        const d = await fetchSummary();
+        document.getElementById('month-label').textContent = 'Hisobot · ' + d.month;
+        renderTop(d);
+        renderChart(d.expenses_by_category, d.currency);
+        renderTransactions(d.transactions, d.currency);
       } catch (err) {
         console.error(err);
-        document.getElementById('balance').classList.remove('shimmer');
-        document.getElementById('balance').textContent = '—';
+        ['balance','m-income','m-expense'].forEach(id => {
+          const el = document.getElementById(id); el.classList.remove('shimmer'); el.textContent = '—';
+        });
         tg?.showAlert?.('Maʼlumotlarni yuklab boʼlmadi. Qayta urinib koʼring.');
       }
     }
 
-    // -------------------------------------------------------------------
-    // Events
-    // -------------------------------------------------------------------
     document.getElementById('refresh-btn').addEventListener('click', () => {
       tg?.HapticFeedback?.impactOccurred?.('light');
+      document.getElementById('refresh-btn').style.transform = 'rotate(360deg)';
+      document.getElementById('refresh-btn').style.transition = 'transform .5s ease';
+      setTimeout(() => document.getElementById('refresh-btn').style.transform = '', 500);
       load();
     });
     document.getElementById('close-btn').addEventListener('click', () => {
+      tg?.HapticFeedback?.impactOccurred?.('medium');
       tg ? tg.close() : window.close();
     });
 
