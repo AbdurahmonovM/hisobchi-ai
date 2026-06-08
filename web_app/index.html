@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Hisobchi AI</title>
+
+  <!-- Telegram Web App SDK: gives us window.Telegram.WebApp (theme, initData, ...) -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- TailwindCSS via CDN (fine for a small embedded Web App) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js for the expense pie chart -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* Map Telegram's theme params onto CSS variables so the UI auto-themes
+       to the user's light/dark Telegram. Sensible fallbacks for browsers. */
+    :root {
+      --bg: var(--tg-theme-bg-color, #ffffff);
+      --text: var(--tg-theme-text-color, #1a1a1a);
+      --hint: var(--tg-theme-hint-color, #8a8a8e);
+      --card: var(--tg-theme-secondary-bg-color, #f3f4f6);
+      --accent: var(--tg-theme-button-color, #2563eb);
+      --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    }
+    body { background: var(--bg); color: var(--text); }
+    .card { background: var(--card); }
+    .hint { color: var(--hint); }
+    /* Skeleton shimmer while loading */
+    .shimmer {
+      background: linear-gradient(90deg, rgba(128,128,128,.12) 25%, rgba(128,128,128,.22) 37%, rgba(128,128,128,.12) 63%);
+      background-size: 400% 100%; animation: shimmer 1.4s ease infinite;
+    }
+    @keyframes shimmer { 0% { background-position: 100% 0 } 100% { background-position: -100% 0 } }
+  </style>
+</head>
+
+<body class="min-h-screen antialiased">
+  <main class="max-w-md mx-auto px-4 py-5">
+
+    <!-- Header -->
+    <header class="flex items-center justify-between mb-5">
+      <div>
+        <h1 class="text-xl font-bold">💰 Hisobchi AI</h1>
+        <p class="hint text-xs" id="month-label">Yuklanmoqda...</p>
+      </div>
+      <button id="refresh-btn" class="text-sm px-3 py-1.5 rounded-lg"
+              style="background: var(--accent); color: var(--accent-text);">
+        ↻ Yangilash
+      </button>
+    </header>
+
+    <!-- Balance card -->
+    <section class="card rounded-2xl p-5 mb-5 shadow-sm">
+      <p class="hint text-xs uppercase tracking-wide mb-1">Joriy balans</p>
+      <p id="balance" class="text-3xl font-extrabold shimmer rounded h-9 w-40">&nbsp;</p>
+    </section>
+
+    <!-- Expense pie chart -->
+    <section class="card rounded-2xl p-5 mb-5 shadow-sm">
+      <h2 class="font-semibold mb-3">Bu oy xarajatlari</h2>
+      <div class="relative" style="height: 240px;">
+        <canvas id="expense-chart"></canvas>
+      </div>
+      <p id="no-expenses" class="hint text-sm text-center mt-4 hidden">
+        Bu oy hali xarajatlar yo'q.
+      </p>
+    </section>
+
+    <!-- Recent transactions -->
+    <section class="card rounded-2xl p-5 shadow-sm">
+      <h2 class="font-semibold mb-3">So'nggi tranzaksiyalar</h2>
+      <ul id="tx-list" class="divide-y divide-black/5"></ul>
+      <p id="no-tx" class="hint text-sm text-center py-4 hidden">
+        Hali tranzaksiyalar yo'q. Botga ovozli xabar yuboring!
+      </p>
+    </section>
+
+    <button id="close-btn" class="w-full mt-5 py-3 rounded-xl font-medium"
+            style="background: var(--accent); color: var(--accent-text);">
+      Yopish
+    </button>
+  </main>
+
+  <script>
+    // -------------------------------------------------------------------
+    // Telegram Web App bootstrap
+    // -------------------------------------------------------------------
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      tg.ready();                 // tell Telegram we're loaded
+      tg.expand();                // use full height
+      tg.setHeaderColor?.('secondary_bg_color');
+    }
+
+    // Category -> emoji + friendly Uzbek label for the UI.
+    const CATEGORY_META = {
+      food:          { icon: '🍽️', label: 'Ovqat' },
+      transport:     { icon: '🚕', label: 'Transport' },
+      shopping:      { icon: '🛍️', label: 'Xaridlar' },
+      bills:         { icon: '🧾', label: 'Toʼlovlar' },
+      health:        { icon: '💊', label: 'Sogʻliq' },
+      education:     { icon: '📚', label: 'Taʼlim' },
+      entertainment: { icon: '🎮', label: 'Koʼngilochar' },
+      salary:        { icon: '💵', label: 'Oylik' },
+      transfer:      { icon: '🔁', label: 'Oʼtkazma' },
+      other:         { icon: '📌', label: 'Boshqa' },
+    };
+    const meta = (c) => CATEGORY_META[c] || CATEGORY_META.other;
+
+    let chart = null;
+
+    function fmtMoney(value, currency) {
+      // 1 234 567 style grouping, no decimals.
+      return new Intl.NumberFormat('uz-UZ', { maximumFractionDigits: 0 })
+        .format(value) + ' ' + currency;
+    }
+
+    // -------------------------------------------------------------------
+    // Data fetch — initData goes in the Authorization header so the server
+    // can verify the signature and trust the user id (see web_app_server.py).
+    // -------------------------------------------------------------------
+    async function fetchSummary() {
+      const initData = tg?.initData || '';
+      const res = await fetch('/api/summary', {
+        headers: { 'Authorization': 'tma ' + initData },
+      });
+      if (!res.ok) throw new Error('API error ' + res.status);
+      return res.json();
+    }
+
+    function renderBalance(balance, currency) {
+      const el = document.getElementById('balance');
+      el.classList.remove('shimmer');
+      el.textContent = fmtMoney(balance, currency);
+      el.style.color = balance >= 0 ? '' : '#ef4444';
+    }
+
+    function renderChart(expenses, currency) {
+      const canvas = document.getElementById('expense-chart');
+      const empty = document.getElementById('no-expenses');
+
+      if (!expenses.length) {
+        empty.classList.remove('hidden');
+        canvas.classList.add('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+      canvas.classList.remove('hidden');
+
+      const palette = ['#2563eb','#16a34a','#f59e0b','#ef4444','#8b5cf6',
+                       '#06b6d4','#ec4899','#84cc16','#f97316','#64748b'];
+
+      const labels = expenses.map(e => meta(e.category).icon + ' ' + meta(e.category).label);
+      const data = expenses.map(e => e.amount);
+
+      if (chart) chart.destroy();
+      chart = new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{ data, backgroundColor: palette, borderWidth: 0 }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '62%',
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ' ' + fmtMoney(ctx.parsed, currency),
+              },
+            },
+          },
+        },
+      });
+    }
+
+    function renderTransactions(transactions, currency) {
+      const list = document.getElementById('tx-list');
+      const empty = document.getElementById('no-tx');
+      list.innerHTML = '';
+
+      if (!transactions.length) {
+        empty.classList.remove('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+
+      for (const t of transactions) {
+        const m = meta(t.category);
+        const isIncome = t.type === 'income';
+        const sign = isIncome ? '+' : (t.type === 'expense' ? '−' : '');
+        const color = isIncome ? '#16a34a' : (t.type === 'expense' ? '#ef4444' : '#6b7280');
+
+        const li = document.createElement('li');
+        li.className = 'flex items-center justify-between py-3';
+        li.innerHTML = `
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="text-xl">${m.icon}</span>
+            <div class="min-w-0">
+              <p class="font-medium truncate">${t.description || m.label}</p>
+              <p class="hint text-xs">${m.label} • ${t.date}</p>
+            </div>
+          </div>
+          <span class="font-semibold whitespace-nowrap" style="color:${color}">
+            ${sign}${fmtMoney(t.amount, currency)}
+          </span>`;
+        list.appendChild(li);
+      }
+    }
+
+    async function load() {
+      try {
+        const data = await fetchSummary();
+        document.getElementById('month-label').textContent = 'Hisobot • ' + data.month;
+        renderBalance(data.balance, data.currency);
+        renderChart(data.expenses_by_category, data.currency);
+        renderTransactions(data.transactions, data.currency);
+      } catch (err) {
+        console.error(err);
+        document.getElementById('balance').classList.remove('shimmer');
+        document.getElementById('balance').textContent = '—';
+        tg?.showAlert?.('Maʼlumotlarni yuklab boʼlmadi. Qayta urinib koʼring.');
+      }
+    }
+
+    // -------------------------------------------------------------------
+    // Events
+    // -------------------------------------------------------------------
+    document.getElementById('refresh-btn').addEventListener('click', () => {
+      tg?.HapticFeedback?.impactOccurred?.('light');
+      load();
+    });
+    document.getElementById('close-btn').addEventListener('click', () => {
+      tg ? tg.close() : window.close();
+    });
+
+    load();
+  </script>
+</body>
+</html>
