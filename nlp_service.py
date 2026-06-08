@@ -27,6 +27,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -55,6 +56,45 @@ CATEGORIES = [
     "transfer",      # perevod, o'tkazma
     "other",
 ]
+
+
+# Number-word multipliers (Uzbek + Russian) for the lightweight amount parser.
+_AMOUNT_MULTIPLIERS: list[tuple[tuple[str, ...], int]] = [
+    (("milliard", "mlrd", "млрд"), 1_000_000_000),
+    (("million", "mln", "млн"), 1_000_000),
+    (("ming", "тысяч", "тыс"), 1_000),
+]
+
+
+def parse_uzbek_amount(text: str) -> Optional[Decimal]:
+    """Parse a money amount from short Uzbek/Russian text WITHOUT calling an LLM.
+
+    Used for onboarding income input where the user just states a number, e.g.
+    "5 million", "5000000", "yarim million", "50 ming". Returns None if no
+    number can be found (so the bot can re-prompt instead of guessing).
+    """
+    if not text:
+        return None
+
+    t = text.lower().replace(",", ".")
+    match = re.search(r"\d+(?:\.\d+)?", t)
+    has_yarim = "yarim" in t  # "half"
+
+    multiplier = 1
+    for words, factor in _AMOUNT_MULTIPLIERS:
+        if any(w in t for w in words):
+            multiplier = factor
+            break
+
+    if match is None:
+        # e.g. bare "yarim million" with no digits.
+        return Decimal(str(0.5 * multiplier)) if (has_yarim and multiplier > 1) else None
+
+    number = float(match.group())
+    if has_yarim:
+        number += 0.5
+    value = Decimal(str(number)) * multiplier
+    return value if value > 0 else None
 
 
 @dataclass(slots=True)

@@ -26,7 +26,9 @@ import logging
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -37,14 +39,15 @@ from aiogram.types import (
 from config import settings
 from database import (
     AsyncSessionLocal,
-    TxType,
     add_transaction,
     get_balance,
     get_monthly_totals,
     get_or_create_user,
     init_db,
+    set_monthly_income,
+    update_user_profile,
 )
-from nlp_service import extract_transaction
+from nlp_service import extract_transaction, parse_uzbek_amount
 from speech_service import TranscriptionError, transcribe_voice
 
 logging.basicConfig(
@@ -57,6 +60,14 @@ router = Router(name="hisobchi")
 
 # Emojis per type for friendlier confirmation messages.
 _TYPE_EMOJI = {"income": "🟢", "expense": "🔴", "transfer": "🔁"}
+
+
+class Onboarding(StatesGroup):
+    """Three-step intake on first /start: first name -> last name -> income."""
+
+    first_name = State()
+    last_name = State()
+    income = State()
 
 
 def _web_app_keyboard() -> InlineKeyboardMarkup:
@@ -82,27 +93,99 @@ def _fmt_money(amount, currency: str = settings.DEFAULT_CURRENCY) -> str:
 # Commands
 # ---------------------------------------------------------------------------
 @router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
-    """Register the user and greet them with the Web App button."""
+async def cmd_start(message: Message, state: FSMContext) -> None:
+    """Register the user. If new, run onboarding; otherwise greet them back."""
     u = message.from_user
     async with AsyncSessionLocal() as session:
-        await get_or_create_user(
+        user = await get_or_create_user(
             session,
             user_id=u.id,
             username=u.username,
             full_name=u.full_name,
             language_code=u.language_code,
         )
+        already = user.is_onboarded
 
+    # Returning, fully set-up user → just greet + Web App button.
+    if already:
+        await state.clear()
+        await message.answer(
+            f"👋 Qaytganingiz bilan, <b>{user.first_name or 'do‘stim'}</b>!\n\n"
+            "Xarajat yoki kirimni ovozli xabar bilan yuboring — men hisoblab "
+            "boraman.\n\n"
+            "📊 Hisobotni ko'rish uchun tugmani bosing.",
+            reply_markup=_web_app_keyboard(),
+        )
+        return
+
+    # New user → start the 3-step onboarding.
+    await state.set_state(Onboarding.first_name)
     await message.answer(
         "👋 <b>Hisobchi AI</b>ga xush kelibsiz!\n\n"
-        "Menga ovozli xabar yuboring — men daromad va xarajatlaringizni "
-        "avtomatik yozib boraman.\n\n"
+        "Boshlashdan oldin bir-ikki savol beraman.\n\n"
+        "1️⃣ <b>Ismingizni</b> yozing:"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Onboarding steps (FSM). These are registered BEFORE the generic text/voice
+# handlers, and those generic handlers use StateFilter(None), so a user being
+# onboarded never falls through to transaction parsing.
+# ---------------------------------------------------------------------------
+@router.message(Onboarding.first_name, F.text)
+async def ob_first_name(message: Message, state: FSMContext) -> None:
+    await state.update_data(first_name=message.text.strip())
+    await state.set_state(Onboarding.last_name)
+    await message.answer("2️⃣ <b>Familyangizni</b> yozing:")
+
+
+@router.message(Onboarding.last_name, F.text)
+async def ob_last_name(message: Message, state: FSMContext) -> None:
+    await state.update_data(last_name=message.text.strip())
+    await state.set_state(Onboarding.income)
+    await message.answer(
+        "3️⃣ <b>Oylik daromadingizni</b> yozing.\n"
+        "Masalan: <i>5 million</i> yoki <i>5000000</i>"
+    )
+
+
+@router.message(Onboarding.income)
+async def ob_income(message: Message, state: FSMContext) -> None:
+    # Parse the number locally (no LLM) so we never invent an approximate value.
+    amount = parse_uzbek_amount(message.text or "")
+    if amount is None or amount <= 0:
+        await message.answer(
+            "🤔 Summani tushunmadim. Faqat raqam yozing.\n"
+            "Masalan: <i>5 million</i> yoki <i>5000000</i>"
+        )
+        return
+
+    import datetime as dt
+
+    data = await state.get_data()
+    first = data.get("first_name", "")
+    last = data.get("last_name", "")
+
+    async with AsyncSessionLocal() as session:
+        await update_user_profile(
+            session, user_id=message.from_user.id, first_name=first, last_name=last
+        )
+        await set_monthly_income(
+            session,
+            user_id=message.from_user.id,
+            amount=amount,
+            tx_date=dt.date.today(),
+        )
+
+    await state.clear()
+    await message.answer(
+        f"✅ Tayyor, <b>{first} {last}</b>!\n\n"
+        f"💵 Oylik daromad: <b>{_fmt_money(amount)}</b>\n\n"
+        "Endi xarajatlaringizni ovozli xabar bilan yuboring — men ularni "
+        "daromadingizdan ayirib, balansni hisoblab boraman.\n\n"
         "Masalan ayting:\n"
         "• <i>«obed uchun 35 ming ketdi»</i>\n"
-        "• <i>«zarplata 5 million tushdi»</i>\n"
-        "• <i>«50 ming so'm perevod qildim»</i>\n\n"
-        "📊 Hisobotni ko'rish uchun pastdagi tugmani bosing.",
+        "• <i>«taksiga 20 ming»</i>",
         reply_markup=_web_app_keyboard(),
     )
 
@@ -145,9 +228,22 @@ async def cmd_help(message: Message) -> None:
 # ---------------------------------------------------------------------------
 # Voice handler — the core feature
 # ---------------------------------------------------------------------------
-@router.message(F.voice | F.audio)
+@router.message(StateFilter(None), F.voice | F.audio)
 async def handle_voice(message: Message, bot: Bot) -> None:
     """Transcribe a voice/audio message, extract a transaction, store it."""
+    # Make sure the user finished onboarding first.
+    async with AsyncSessionLocal() as session:
+        user = await get_or_create_user(
+            session,
+            user_id=message.from_user.id,
+            username=message.from_user.username,
+            full_name=message.from_user.full_name,
+            language_code=message.from_user.language_code,
+        )
+        if not user.is_onboarded:
+            await message.answer("Boshlash uchun /start ni bosing 🙏")
+            return
+
     # Give immediate feedback — STT + NLP can take a couple of seconds.
     status = await message.answer("🎧 Eshityapman...")
 
@@ -219,8 +315,19 @@ async def handle_voice(message: Message, bot: Bot) -> None:
 
 
 # Fallback for plain text — let users type transactions too.
-@router.message(F.text & ~F.text.startswith("/"))
+@router.message(StateFilter(None), F.text & ~F.text.startswith("/"))
 async def handle_text(message: Message) -> None:
+    async with AsyncSessionLocal() as session:
+        user = await get_or_create_user(
+            session,
+            user_id=message.from_user.id,
+            username=message.from_user.username,
+            full_name=message.from_user.full_name,
+        )
+        if not user.is_onboarded:
+            await message.answer("Boshlash uchun /start ni bosing 🙏")
+            return
+
     parsed = await extract_transaction(message.text)
     if parsed is None:
         await message.answer(

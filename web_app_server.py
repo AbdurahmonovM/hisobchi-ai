@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import (
+    User,
     get_balance,
     get_expense_breakdown,
     get_monthly_totals,
@@ -133,16 +134,25 @@ async def api_summary(
     """
     today = dt.date.today()
 
+    user = await session.get(User, user_id)
     balance = await get_balance(session, user_id)
     income, expense = await get_monthly_totals(session, user_id, today.year, today.month)
     breakdown = await get_expense_breakdown(session, user_id, today.year, today.month)
     recent = await get_recent_transactions(session, user_id, limit=15)
 
+    full_name = ""
+    monthly_income_set = 0.0
+    if user is not None:
+        full_name = (f"{user.first_name or ''} {user.last_name or ''}").strip()
+        monthly_income_set = float(user.monthly_income or 0)
+
     return {
         "currency": settings.DEFAULT_CURRENCY,
+        "name": full_name,
         "balance": float(balance),
         "month": today.strftime("%Y-%m"),
         "monthly_income": float(income),
+        "monthly_income_set": monthly_income_set,
         "monthly_expense": float(expense),
         "expenses_by_category": [
             {"category": cat, "amount": float(total)} for cat, total in breakdown

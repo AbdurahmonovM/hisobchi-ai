@@ -74,6 +74,7 @@
 
     <!-- Balance hero -->
     <section class="hero rounded-3xl p-5 mb-4 text-white reveal">
+      <p id="greeting" class="text-xs font-medium opacity-90 mb-2 hidden"></p>
       <p class="text-xs/none opacity-80 mb-2">Joriy balans</p>
       <p id="balance" class="text-[2rem] font-extrabold tracking-tight shimmer h-9 w-44">&nbsp;</p>
       <div class="flex items-center gap-1.5 mt-2 text-xs opacity-90">
@@ -187,6 +188,13 @@
     function unshimmer(el) { el.classList.remove('shimmer'); el.classList.remove('h-6','h-9','w-24','w-44'); }
 
     function renderTop(d) {
+      // Greeting with the user's onboarding name.
+      if (d.name) {
+        const g = document.getElementById('greeting');
+        g.textContent = 'Salom, ' + d.name + ' 👋';
+        g.classList.remove('hidden');
+      }
+
       const b = document.getElementById('balance');
       unshimmer(b);
       b.textContent = fmtMoney(d.balance, d.currency);

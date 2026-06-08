@@ -85,6 +85,14 @@ class User(Base):
     full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     language_code: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
     currency: Mapped[str] = mapped_column(String(8), default=settings.DEFAULT_CURRENCY)
+
+    # Collected during onboarding (/start): the user types these themselves —
+    # we never guess or pre-fill any amount.
+    first_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    monthly_income: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
+    is_onboarded: Mapped[bool] = mapped_column(default=False)
+
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -162,6 +170,53 @@ async def get_or_create_user(
         session.add(user)
         await session.commit()
     return user
+
+
+async def update_user_profile(
+    session: AsyncSession, *, user_id: int, first_name: str, last_name: str
+) -> User:
+    """Save the name the user typed during onboarding."""
+    user = await session.get(User, user_id)
+    if user is None:
+        user = User(id=user_id)
+        session.add(user)
+    user.first_name = first_name
+    user.last_name = last_name
+    user.full_name = f"{first_name} {last_name}".strip()
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def set_monthly_income(
+    session: AsyncSession, *, user_id: int, amount: Decimal | float, tx_date: dt.date
+) -> None:
+    """Store the user's stated monthly income and finish onboarding.
+
+    The income is also recorded as a real income transaction (category=salary)
+    so the existing balance logic (income − expense) works without any special
+    cases — the starting balance simply equals the monthly income, and every
+    expense the user reports later is subtracted from it.
+    """
+    user = await session.get(User, user_id)
+    if user is None:
+        user = User(id=user_id)
+        session.add(user)
+    user.monthly_income = Decimal(str(amount))
+    user.is_onboarded = True
+
+    session.add(
+        Transaction(
+            user_id=user_id,
+            amount=Decimal(str(amount)),
+            type=TxType.income,
+            category="salary",
+            description="Oylik daromad",
+            tx_date=tx_date,
+            raw_text="onboarding: monthly income",
+        )
+    )
+    await session.commit()
 
 
 async def add_transaction(
