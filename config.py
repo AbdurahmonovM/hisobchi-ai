@@ -14,7 +14,7 @@ Import `settings` anywhere in the project:
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # On Railway this is your service domain. We try to auto-detect if not set.
     WEB_APP_URL: str = Field(
         default="", 
-        validation_alias="RAILWAY_STATIC_URL",
+        validation_alias=AliasChoices("WEB_APP_URL", "RAILWAY_STATIC_URL", "RAILWAY_PUBLIC_DOMAIN"),
         description="Public HTTPS base URL of the Web App"
     )
 
@@ -78,14 +78,18 @@ class Settings(BaseSettings):
     def _validate_web_app_url(cls, v: str) -> str:
         """Ensure the URL is set and starts with https (required by Telegram)."""
         if not v:
-            # If still empty after alias check, it will fail validation if required.
-            # But we want to give a clear error.
+            # On Railway, RAILWAY_STATIC_URL is often just the domain.
             return v
         
         v = v.rstrip("/")
+        # If it's a domain only, prepend https://
         if not v.startswith("http"):
-            # Assume https for convenience if only domain is given
             v = f"https://{v}"
+        
+        # Telegram WebApp URLs MUST be https
+        if v.startswith("http://"):
+            v = v.replace("http://", "https://")
+            
         return v
 
     @model_validator(mode="after")

@@ -38,10 +38,9 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Single shared async client (re-used across calls — cheaper than re-creating).
-# Works for both OpenAI and Groq: Groq exposes an OpenAI-compatible API, so we
-# just point base_url at it (see config.ai_base_url). FREE default = Groq+Llama.
-_client = AsyncOpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
+def get_ai_client() -> AsyncOpenAI:
+    """Lazy-load the OpenAI/Groq client using the latest settings."""
+    return AsyncOpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
 
 # Fixed taxonomy. Keeping categories closed makes reports aggregate cleanly.
 CATEGORIES = [
@@ -262,7 +261,8 @@ async def extract_transaction(
     today = today or dt.date.today()
 
     try:
-        response = await _client.chat.completions.create(
+        client = get_ai_client()
+        response = await client.chat.completions.create(
             model=settings.nlp_model,
             messages=_build_messages(text, today),
             temperature=0,  # deterministic extraction

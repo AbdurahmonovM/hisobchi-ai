@@ -55,6 +55,7 @@ dp.include_router(router)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Set up DB + register the Telegram webhook on boot; clean up on shutdown."""
+    logger.info("Starting Hisobchi AI (Provider: %s, Mode: %s)", settings.AI_PROVIDER, settings.BOT_MODE)
     logger.info("Initializing database...")
     try:
         await init_db()
@@ -71,13 +72,16 @@ async def lifespan(_: FastAPI):
     webhook_url = settings.webhook_url
     
     # Basic sanity check
-    if "localhost" in webhook_url or "0.0.0.0" in webhook_url or "127.0.0.1" in webhook_url:
-        logger.error("!!! CRITICAL ERROR: WEB_APP_URL is set to localhost/0.0.0.0. !!!")
-        logger.error("Telegram cannot reach your local machine. Set WEB_APP_URL to your Railway public domain.")
-        logger.error("Current WEB_APP_URL: %s", settings.WEB_APP_URL)
+    if any(x in webhook_url for x in ["localhost", "0.0.0.0", "127.0.0.1", "example.com"]):
+        logger.warning("!!! WARNING: WEB_APP_URL is set to localhost or a placeholder (example.com). !!!")
+        logger.warning("Telegram cannot reach your server. Set WEB_APP_URL to your Railway public domain.")
+        logger.warning("Current WEB_APP_URL: %s", settings.WEB_APP_URL)
     else:
         logger.info("Checking current webhook status...")
         try:
+            bot_user = await bot.get_me()
+            logger.info("✅ Bot connected: @%s (ID: %s)", bot_user.username, bot_user.id)
+            
             info = await bot.get_webhook_info()
             logger.info("Current Webhook Info: %s", info.model_dump_json(indent=2))
             
@@ -90,9 +94,6 @@ async def lifespan(_: FastAPI):
             )
             if success:
                 logger.info("✅ Webhook registered successfully.")
-                # Verify again
-                new_info = await bot.get_webhook_info()
-                logger.info("New Webhook Info: %s", new_info.model_dump_json(indent=2))
             else:
                 logger.error("❌ Failed to register webhook (Telegram returned False).")
         except Exception as e:
@@ -103,9 +104,6 @@ async def lifespan(_: FastAPI):
     finally:
         logger.info("Shutting down...")
         try:
-            # Optionally keep webhook on shutdown to avoid missing updates during deploy
-            # but usually for webhooks it's fine to keep it.
-            # await bot.delete_webhook() 
             await bot.session.close()
             logger.info("Bot session closed.")
         except Exception:
@@ -118,16 +116,30 @@ app = FastAPI(title="Hisobchi AI", lifespan=lifespan)
 register_web_routes(app)
 
 
+@app.get("/health")
+async def health_check():
+    """Simple health check that doesn't depend on DB (used by Railway)."""
+    return {"status": "ok", "app": "hisobchi-ai"}
+
+
 @app.get("/webhook-info")
 async def get_webhook_status():
     """Diagnostic endpoint to check the current Telegram webhook configuration."""
     try:
         info = await bot.get_webhook_info()
+        bot_user = await bot.get_me()
         return {
             "status": "ok",
             "webhook_info": info.model_dump(),
-            "settings_url": settings.webhook_url,
-            "bot_id": (await bot.get_me()).id
+            "settings": {
+                "webhook_url": settings.webhook_url,
+                "bot_mode": settings.BOT_MODE,
+                "ai_provider": settings.AI_PROVIDER,
+            },
+            "bot": {
+                "id": bot_user.id,
+                "username": bot_user.username,
+            }
         }
     except Exception as e:
         logger.exception("Error getting webhook info")
@@ -141,7 +153,7 @@ async def register_webhook():
         success = await bot.set_webhook(
             url=settings.webhook_url,
             secret_token=settings.WEBHOOK_SECRET,
-            drop_pending_updates=False, # Keep updates if manual
+            drop_pending_updates=False,
             allowed_updates=dp.resolve_used_update_types(),
         )
         return {"success": success, "url": settings.webhook_url}

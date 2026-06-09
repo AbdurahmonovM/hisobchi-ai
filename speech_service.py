@@ -24,9 +24,10 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Works for both OpenAI and Groq (OpenAI-compatible API). FREE default = Groq
-# whisper-large-v3-turbo. base_url=None falls back to OpenAI's endpoint.
-_client = AsyncOpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
+def get_ai_client() -> AsyncOpenAI:
+    """Lazy-load the OpenAI/Groq client using the latest settings."""
+    return AsyncOpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
+
 
 # A short priming prompt nudges Whisper toward finance/number vocabulary and
 # the Uzbek+Russian code-switching it will hear. It is NOT a transcript — just
@@ -70,7 +71,8 @@ async def transcribe_voice(audio_bytes: bytes, filename: str = "voice.ogg") -> s
     buffer.name = filename
 
     try:
-        result = await _client.audio.transcriptions.create(
+        client = get_ai_client()
+        result = await client.audio.transcriptions.create(
             model=settings.whisper_model,
             file=buffer,
             language="uz",            # bias toward Uzbek

@@ -179,8 +179,9 @@ async def api_summary(
     }
 
 
-@web_router.get("/health")
-async def health(session: AsyncSession = Depends(get_session)) -> dict:
+@web_router.get("/health-db")
+async def health_db(session: AsyncSession = Depends(get_session)) -> dict:
+    """Check database connectivity."""
     from sqlalchemy import text
     try:
         await session.execute(text("SELECT 1"))
