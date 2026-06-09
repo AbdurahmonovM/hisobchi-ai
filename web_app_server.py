@@ -41,9 +41,11 @@ from config import settings
 from database import (
     User,
     get_balance,
+    get_daily_totals,
     get_expense_breakdown,
     get_monthly_totals,
     get_recent_transactions,
+    get_weekly_totals,
     get_session,
     init_db,
 )
@@ -136,7 +138,9 @@ async def api_summary(
 
     user = await session.get(User, user_id)
     balance = await get_balance(session, user_id)
-    income, expense = await get_monthly_totals(session, user_id, today.year, today.month)
+    d_income, d_expense = await get_daily_totals(session, user_id, today)
+    w_income, w_expense = await get_weekly_totals(session, user_id, today)
+    m_income, m_expense = await get_monthly_totals(session, user_id, today.year, today.month)
     breakdown = await get_expense_breakdown(session, user_id, today.year, today.month)
     recent = await get_recent_transactions(session, user_id, limit=15)
 
@@ -151,9 +155,13 @@ async def api_summary(
         "name": full_name,
         "balance": float(balance),
         "month": today.strftime("%Y-%m"),
-        "monthly_income": float(income),
+        "daily_income": float(d_income),
+        "daily_expense": float(d_expense),
+        "weekly_income": float(w_income),
+        "weekly_expense": float(w_expense),
+        "monthly_income": float(m_income),
         "monthly_income_set": monthly_income_set,
-        "monthly_expense": float(expense),
+        "monthly_expense": float(m_expense),
         "expenses_by_category": [
             {"category": cat, "amount": float(total)} for cat, total in breakdown
         ],
@@ -172,8 +180,13 @@ async def api_summary(
 
 
 @web_router.get("/health")
-async def health() -> dict:
-    return {"status": "ok"}
+async def health(session: AsyncSession = Depends(get_session)) -> dict:
+    from sqlalchemy import text
+    try:
+        await session.execute(text("SELECT 1"))
+        return {"status": "ok", "database": "connected"}
+    except Exception as e:
+        return {"status": "error", "database": str(e)}
 
 
 # ---------------------------------------------------------------------------

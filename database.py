@@ -323,3 +323,51 @@ async def get_monthly_totals(
         )
     )
     return Decimal(income or 0), Decimal(expense or 0)
+
+
+async def get_daily_totals(
+    session: AsyncSession, user_id: int, date: dt.date
+) -> tuple[Decimal, Decimal]:
+    """Return (income, expense) totals for a specific day."""
+    income = await session.scalar(
+        select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+            Transaction.user_id == user_id,
+            Transaction.type == TxType.income,
+            Transaction.tx_date == date,
+        )
+    )
+    expense = await session.scalar(
+        select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+            Transaction.user_id == user_id,
+            Transaction.type == TxType.expense,
+            Transaction.tx_date == date,
+        )
+    )
+    return Decimal(income or 0), Decimal(expense or 0)
+
+
+async def get_weekly_totals(
+    session: AsyncSession, user_id: int, date: dt.date
+) -> tuple[Decimal, Decimal]:
+    """Return (income, expense) totals for the week containing the given date."""
+    # Week starts on Monday
+    start = date - dt.timedelta(days=date.weekday())
+    end = start + dt.timedelta(days=7)
+
+    income = await session.scalar(
+        select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+            Transaction.user_id == user_id,
+            Transaction.type == TxType.income,
+            Transaction.tx_date >= start,
+            Transaction.tx_date < end,
+        )
+    )
+    expense = await session.scalar(
+        select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+            Transaction.user_id == user_id,
+            Transaction.type == TxType.expense,
+            Transaction.tx_date >= start,
+            Transaction.tx_date < end,
+        )
+    )
+    return Decimal(income or 0), Decimal(expense or 0)

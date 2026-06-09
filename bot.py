@@ -211,6 +211,32 @@ async def cmd_balance(message: Message) -> None:
     )
 
 
+@router.message(Command("summary"))
+async def cmd_summary(message: Message) -> None:
+    """Detailed text summary for different periods."""
+    import datetime as dt
+    from database import get_daily_totals, get_weekly_totals
+
+    today = dt.date.today()
+    async with AsyncSessionLocal() as session:
+        d_inc, d_exp = await get_daily_totals(session, message.from_user.id, today)
+        w_inc, w_exp = await get_weekly_totals(session, message.from_user.id, today)
+        m_inc, m_exp = await get_monthly_totals(session, message.from_user.id, today.year, today.month)
+        balance = await get_balance(session, message.from_user.id)
+
+    await message.answer(
+        f"📊 <b>Moliyaviy hisobot</b>\n\n"
+        f"🗓 <b>Bugun:</b>\n"
+        f"🟢 +{_fmt_money(d_inc)} | 🔴 −{_fmt_money(d_exp)}\n\n"
+        f"📅 <b>Shu hafta:</b>\n"
+        f"🟢 +{_fmt_money(w_inc)} | 🔴 −{_fmt_money(w_exp)}\n\n"
+        f"📆 <b>Shu oy:</b>\n"
+        f"🟢 +{_fmt_money(m_inc)} | 🔴 −{_fmt_money(m_exp)}\n\n"
+        f"💰 <b>Jami balans:</b> {_fmt_money(balance)}",
+        reply_markup=_web_app_keyboard(),
+    )
+
+
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     await message.answer(
@@ -221,6 +247,7 @@ async def cmd_help(message: Message) -> None:
         "3️⃣ Tranzaksiyani saqlayman\n\n"
         "Buyruqlar:\n"
         "/balance — joriy balans\n"
+        "/summary — kunlik/haftalik/oylik hisobot\n"
         "/start — boshlash va hisobot tugmasi",
     )
 

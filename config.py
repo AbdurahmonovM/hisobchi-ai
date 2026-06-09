@@ -24,10 +24,12 @@ class Settings(BaseSettings):
     # --- Telegram ---
     BOT_TOKEN: str = Field(..., description="Token from @BotFather")
     # Public HTTPS URL where the Web App is served (required by Telegram).
-    # On Railway this is your service domain, e.g.
-    #   https://hisobchi-production.up.railway.app
-    # In development use ngrok/cloudflared.
-    WEB_APP_URL: str = Field(..., description="Public HTTPS base URL of the Web App")
+    # On Railway this is your service domain. We try to auto-detect if not set.
+    WEB_APP_URL: str = Field(
+        default="", 
+        validation_alias="RAILWAY_STATIC_URL",
+        description="Public HTTPS base URL of the Web App"
+    )
 
     # Secret shared with Telegram so we can verify incoming webhook requests
     # (sent back by Telegram in the X-Telegram-Bot-Api-Secret-Token header).
@@ -71,20 +73,19 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    @field_validator("DATABASE_URL")
+    @field_validator("WEB_APP_URL")
     @classmethod
-    def _normalize_db_url(cls, v: str) -> str:
-        """Make Railway's Postgres URL compatible with the async driver.
-
-        Railway's Postgres plugin injects DATABASE_URL as
-        `postgresql://...` (or sometimes `postgres://...`), but SQLAlchemy's
-        async engine needs the `+asyncpg` driver suffix. We rewrite it here so
-        you can paste Railway's URL verbatim.
-        """
-        if v.startswith("postgres://"):
-            return v.replace("postgres://", "postgresql+asyncpg://", 1)
-        if v.startswith("postgresql://"):
-            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+    def _validate_web_app_url(cls, v: str) -> str:
+        """Ensure the URL is set and starts with https (required by Telegram)."""
+        if not v:
+            # If still empty after alias check, it will fail validation if required.
+            # But we want to give a clear error.
+            return v
+        
+        v = v.rstrip("/")
+        if not v.startswith("http"):
+            # Assume https for convenience if only domain is given
+            v = f"https://{v}"
         return v
 
     @model_validator(mode="after")

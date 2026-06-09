@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="uz">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
@@ -15,43 +16,85 @@
   <style>
     /* Map Telegram theme params -> CSS variables (auto light/dark). */
     :root {
-      --bg:     var(--tg-theme-bg-color, #0f1115);
-      --text:   var(--tg-theme-text-color, #f5f6f8);
-      --hint:   var(--tg-theme-hint-color, #8a909c);
-      --card:   var(--tg-theme-secondary-bg-color, #1a1d24);
+      --bg: var(--tg-theme-bg-color, #0f1115);
+      --text: var(--tg-theme-text-color, #f5f6f8);
+      --hint: var(--tg-theme-hint-color, #8a909c);
+      --card: var(--tg-theme-secondary-bg-color, #1a1d24);
       --accent: var(--tg-theme-button-color, #3b82f6);
       --accent-text: var(--tg-theme-button-text-color, #ffffff);
       --green: #22c55e;
-      --red:   #ef4444;
+      --red: #ef4444;
     }
-    * { -webkit-tap-highlight-color: transparent; }
+
+    * {
+      -webkit-tap-highlight-color: transparent;
+    }
+
     body {
       background: var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    .card { background: var(--card); }
-    .hint { color: var(--hint); }
+
+    .card {
+      background: var(--card);
+    }
+
+    .hint {
+      color: var(--hint);
+    }
 
     /* Gradient hero for the balance */
     .hero {
       background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 50%, #06b6d4 100%);
-      box-shadow: 0 12px 30px -10px rgba(59,130,246,.55);
+      box-shadow: 0 12px 30px -10px rgba(59, 130, 246, .55);
     }
 
     /* Skeleton shimmer while loading */
     .shimmer {
-      background: linear-gradient(90deg, rgba(128,128,128,.12) 25%, rgba(128,128,128,.24) 37%, rgba(128,128,128,.12) 63%);
-      background-size: 400% 100%; animation: shimmer 1.4s ease infinite; border-radius: .5rem;
+      background: linear-gradient(90deg, rgba(128, 128, 128, .12) 25%, rgba(128, 128, 128, .24) 37%, rgba(128, 128, 128, .12) 63%);
+      background-size: 400% 100%;
+      animation: shimmer 1.4s ease infinite;
+      border-radius: .5rem;
     }
-    @keyframes shimmer { 0% { background-position: 100% 0 } 100% { background-position: -100% 0 } }
+
+    @keyframes shimmer {
+      0% {
+        background-position: 100% 0
+      }
+
+      100% {
+        background-position: -100% 0
+      }
+    }
 
     /* Entrance animation */
-    .reveal { opacity: 0; transform: translateY(8px); animation: reveal .45s ease forwards; }
-    @keyframes reveal { to { opacity: 1; transform: none } }
+    .reveal {
+      opacity: 0;
+      transform: translateY(8px);
+      animation: reveal .45s ease forwards;
+    }
 
-    .tap { transition: transform .12s ease; }
-    .tap:active { transform: scale(.96); }
+    @keyframes reveal {
+      to {
+        opacity: 1;
+        transform: none
+      }
+    }
+
+    .tap {
+      transition: transform .12s ease;
+    }
+
+    .tap:active {
+      transform: scale(.96);
+    }
+
+    .period-tab.active {
+      background: white;
+      color: black;
+      opacity: 1;
+    }
   </style>
 </head>
 
@@ -67,7 +110,8 @@
           <p class="hint text-[11px]" id="month-label">Yuklanmoqda…</p>
         </div>
       </div>
-      <button id="refresh-btn" class="tap w-9 h-9 rounded-xl card flex items-center justify-center text-lg" aria-label="Yangilash">
+      <button id="refresh-btn" class="tap w-9 h-9 rounded-xl card flex items-center justify-center text-lg"
+        aria-label="Yangilash">
         ↻
       </button>
     </header>
@@ -82,24 +126,36 @@
       </div>
     </section>
 
-    <!-- ===== ASOSIY QISM: oylik kirim / chiqim ===== -->
-    <section class="grid grid-cols-2 gap-3 mb-4">
-      <div class="card rounded-2xl p-4 reveal" style="animation-delay:.05s">
-        <div class="flex items-center gap-2 mb-2">
-          <span class="w-7 h-7 rounded-lg flex items-center justify-center text-sm"
-                style="background:rgba(34,197,94,.15); color:var(--green)">↓</span>
-          <span class="hint text-xs">Bu oy kirim</span>
-        </div>
-        <p id="m-income" class="text-lg font-bold shimmer h-6 w-24" style="color:var(--green)">&nbsp;</p>
+    <!-- Stats Section -->
+    <section class="mb-4">
+      <!-- Tab-like headers for periods -->
+      <div class="flex gap-2 mb-3 px-1">
+        <button id="tab-daily"
+          class="period-tab active text-[11px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-full bg-white/10 opacity-50 transition-all">Kunlik</button>
+        <button id="tab-weekly"
+          class="period-tab text-[11px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-full bg-white/10 opacity-50 transition-all">Haftalik</button>
+        <button id="tab-monthly"
+          class="period-tab text-[11px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-full bg-white/10 opacity-50 transition-all">Oylik</button>
       </div>
 
-      <div class="card rounded-2xl p-4 reveal" style="animation-delay:.1s">
-        <div class="flex items-center gap-2 mb-2">
-          <span class="w-7 h-7 rounded-lg flex items-center justify-center text-sm"
-                style="background:rgba(239,68,68,.15); color:var(--red)">↑</span>
-          <span class="hint text-xs">Bu oy chiqim</span>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="card rounded-2xl p-4 reveal" style="animation-delay:.05s">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center text-sm"
+              style="background:rgba(34,197,94,.15); color:var(--green)">↓</span>
+            <span class="hint text-xs">Kirim</span>
+          </div>
+          <p id="stat-income" class="text-lg font-bold shimmer h-6 w-24" style="color:var(--green)">&nbsp;</p>
         </div>
-        <p id="m-expense" class="text-lg font-bold shimmer h-6 w-24" style="color:var(--red)">&nbsp;</p>
+
+        <div class="card rounded-2xl p-4 reveal" style="animation-delay:.1s">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center text-sm"
+              style="background:rgba(239,68,68,.15); color:var(--red)">↑</span>
+            <span class="hint text-xs">Chiqim</span>
+          </div>
+          <p id="stat-expense" class="text-lg font-bold shimmer h-6 w-24" style="color:var(--red)">&nbsp;</p>
+        </div>
       </div>
     </section>
 
@@ -110,7 +166,8 @@
       <div class="relative" style="height: 230px;">
         <canvas id="expense-chart"></canvas>
         <!-- Center total overlay -->
-        <div id="chart-center" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none hidden">
+        <div id="chart-center"
+          class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none hidden">
           <span class="hint text-[10px] uppercase tracking-wide">Jami chiqim</span>
           <span id="chart-total" class="font-bold text-base"></span>
         </div>
@@ -133,7 +190,7 @@
     </section>
 
     <button id="close-btn" class="tap w-full mt-5 py-3.5 rounded-2xl font-semibold text-sm"
-            style="background: var(--accent); color: var(--accent-text);">
+      style="background: var(--accent); color: var(--accent-text);">
       Yopish
     </button>
 
@@ -153,16 +210,16 @@
     }
 
     const CATEGORY_META = {
-      food:          { icon: '🍽️', label: 'Ovqat' },
-      transport:     { icon: '🚕', label: 'Transport' },
-      shopping:      { icon: '🛍️', label: 'Xaridlar' },
-      bills:         { icon: '🧾', label: 'Toʼlovlar' },
-      health:        { icon: '💊', label: 'Sogʻliq' },
-      education:     { icon: '📚', label: 'Taʼlim' },
+      food: { icon: '🍽️', label: 'Ovqat' },
+      transport: { icon: '🚕', label: 'Transport' },
+      shopping: { icon: '🛍️', label: 'Xaridlar' },
+      bills: { icon: '🧾', label: 'Toʼlovlar' },
+      health: { icon: '💊', label: 'Sogʻliq' },
+      education: { icon: '📚', label: 'Taʼlim' },
       entertainment: { icon: '🎮', label: 'Koʼngilochar' },
-      salary:        { icon: '💵', label: 'Oylik' },
-      transfer:      { icon: '🔁', label: 'Oʼtkazma' },
-      other:         { icon: '📌', label: 'Boshqa' },
+      salary: { icon: '💵', label: 'Oylik' },
+      transfer: { icon: '🔁', label: 'Oʼtkazma' },
+      other: { icon: '📌', label: 'Boshqa' },
     };
     const meta = (c) => CATEGORY_META[c] || CATEGORY_META.other;
 
@@ -173,8 +230,8 @@
     }
     function fmtCompact(v, currency) {
       const a = Math.abs(v || 0);
-      if (a >= 1e9) return (v/1e9).toFixed(1).replace('.0','') + ' mlrd ' + currency;
-      if (a >= 1e6) return (v/1e6).toFixed(1).replace('.0','') + ' mln ' + currency;
+      if (a >= 1e9) return (v / 1e9).toFixed(1).replace('.0', '') + ' mlrd ' + currency;
+      if (a >= 1e6) return (v / 1e6).toFixed(1).replace('.0', '') + ' mln ' + currency;
       return fmtMoney(v, currency);
     }
 
@@ -185,9 +242,31 @@
       return res.json();
     }
 
-    function unshimmer(el) { el.classList.remove('shimmer'); el.classList.remove('h-6','h-9','w-24','w-44'); }
+    function unshimmer(el) { el.classList.remove('shimmer'); el.classList.remove('h-6', 'h-9', 'w-24', 'w-44'); }
+
+    let currentPeriod = 'monthly';
+    let globalData = null;
+
+    function renderStats() {
+      if (!globalData) return;
+      const inc = document.getElementById('stat-income');
+      const exp = document.getElementById('stat-expense');
+      unshimmer(inc); unshimmer(exp);
+
+      if (currentPeriod === 'daily') {
+        inc.textContent = fmtCompact(globalData.daily_income, globalData.currency);
+        exp.textContent = fmtCompact(globalData.daily_expense, globalData.currency);
+      } else if (currentPeriod === 'weekly') {
+        inc.textContent = fmtCompact(globalData.weekly_income, globalData.currency);
+        exp.textContent = fmtCompact(globalData.weekly_expense, globalData.currency);
+      } else {
+        inc.textContent = fmtCompact(globalData.monthly_income, globalData.currency);
+        exp.textContent = fmtCompact(globalData.monthly_expense, globalData.currency);
+      }
+    }
 
     function renderTop(d) {
+      globalData = d;
       // Greeting with the user's onboarding name.
       if (d.name) {
         const g = document.getElementById('greeting');
@@ -201,11 +280,7 @@
       document.getElementById('balance-sub').textContent =
         d.balance >= 0 ? '👍 Musbat balans' : '⚠️ Manfiy balans';
 
-      const inc = document.getElementById('m-income');
-      const exp = document.getElementById('m-expense');
-      unshimmer(inc); unshimmer(exp);
-      inc.textContent = fmtCompact(d.monthly_income, d.currency);
-      exp.textContent = fmtCompact(d.monthly_expense, d.currency);
+      renderStats();
     }
 
     function renderChart(expenses, currency) {
@@ -223,8 +298,8 @@
       canvas.classList.remove('hidden');
       center.classList.remove('hidden');
 
-      const palette = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6',
-                       '#06b6d4','#ec4899','#84cc16','#f97316','#64748b'];
+      const palette = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6',
+        '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#64748b'];
       const labels = expenses.map(e => meta(e.category).icon + ' ' + meta(e.category).label);
       const data = expenses.map(e => e.amount);
       const total = data.reduce((s, x) => s + x, 0);
@@ -237,8 +312,12 @@
         options: {
           responsive: true, maintainAspectRatio: false, cutout: '70%',
           plugins: {
-            legend: { position: 'bottom', labels: { color: getComputedStyle(document.body).color,
-                      boxWidth: 10, boxHeight: 10, padding: 12, font: { size: 11 } } },
+            legend: {
+              position: 'bottom', labels: {
+                color: getComputedStyle(document.body).color,
+                boxWidth: 10, boxHeight: 10, padding: 12, font: { size: 11 }
+              }
+            },
             tooltip: { callbacks: { label: (c) => ' ' + fmtMoney(c.parsed, currency) } },
           },
         },
@@ -288,12 +367,22 @@
         renderTransactions(d.transactions, d.currency);
       } catch (err) {
         console.error(err);
-        ['balance','m-income','m-expense'].forEach(id => {
-          const el = document.getElementById(id); el.classList.remove('shimmer'); el.textContent = '—';
+        ['balance', 'stat-income', 'stat-expense'].forEach(id => {
+          const el = document.getElementById(id); if (el) { el.classList.remove('shimmer'); el.textContent = '—'; }
         });
         tg?.showAlert?.('Maʼlumotlarni yuklab boʼlmadi. Qayta urinib koʼring.');
       }
     }
+
+    ['daily', 'weekly', 'monthly'].forEach(p => {
+      document.getElementById('tab-' + p).addEventListener('click', () => {
+        currentPeriod = p;
+        document.querySelectorAll('.period-tab').forEach(t => t.classList.remove('active'));
+        document.getElementById('tab-' + p).classList.add('active');
+        tg?.HapticFeedback?.impactOccurred?.('light');
+        renderStats();
+      });
+    });
 
     document.getElementById('refresh-btn').addEventListener('click', () => {
       tg?.HapticFeedback?.impactOccurred?.('light');
@@ -310,4 +399,5 @@
     load();
   </script>
 </body>
+
 </html>
