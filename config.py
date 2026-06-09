@@ -92,6 +92,24 @@ class Settings(BaseSettings):
             
         return v
 
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def _normalize_db_url(cls, v: str) -> str:
+        """Make Railway's Postgres URL work with the async (asyncpg) driver.
+
+        Railway's Postgres plugin injects `postgresql://...` (or `postgres://`),
+        but SQLAlchemy's async engine needs the `+asyncpg` suffix, otherwise it
+        tries the sync psycopg2 driver and crashes at startup. We rewrite it so
+        `${{Postgres.DATABASE_URL}}` can be pasted verbatim.
+        """
+        if not v:
+            return v
+        if v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        if v.startswith("postgresql://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
+
     @model_validator(mode="after")
     def _check_ai_key(self) -> "Settings":
         """Ensure the chosen provider actually has its API key set."""

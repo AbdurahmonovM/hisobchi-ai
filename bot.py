@@ -70,14 +70,23 @@ class Onboarding(StatesGroup):
     income = State()
 
 
-def _web_app_keyboard() -> InlineKeyboardMarkup:
-    """Inline keyboard with a single button that launches the Web App."""
+def _web_app_keyboard() -> InlineKeyboardMarkup | None:
+    """Inline keyboard with a button that launches the Web App.
+
+    Telegram rejects a WebApp button whose URL isn't a valid https address, and
+    that would make the whole message fail to send. So if WEB_APP_URL isn't set
+    to a real https domain yet (e.g. still a placeholder / empty), we send the
+    message WITHOUT the button — the bot keeps working regardless.
+    """
+    url = (settings.WEB_APP_URL or "").strip()
+    if not url.startswith("https://") or "placeholder" in url or "example.com" in url:
+        return None
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="📊 Hisobotni ochish",
-                    web_app=WebAppInfo(url=settings.WEB_APP_URL),
+                    web_app=WebAppInfo(url=url),
                 )
             ]
         ]
