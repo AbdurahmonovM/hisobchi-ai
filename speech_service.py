@@ -15,17 +15,11 @@ from __future__ import annotations
 
 import logging
 
-from google import genai
 from google.genai import types
 
-from config import settings
+import ai_client
 
 logger = logging.getLogger(__name__)
-
-
-def get_gemini_client() -> genai.Client:
-    """Create a Gemini client from the current settings (cheap to construct)."""
-    return genai.Client(api_key=settings.GEMINI_API_KEY)
 
 
 # Instruction telling Gemini to return a faithful transcript and nothing else.
@@ -64,11 +58,9 @@ async def transcribe_voice(audio_bytes: bytes, mime_type: str = "audio/ogg") -> 
     if not audio_bytes:
         raise TranscriptionError("Empty audio payload")
 
-    client = get_gemini_client()
     try:
-        response = await client.aio.models.generate_content(
-            model=settings.gemini_model,
-            contents=[
+        response = await ai_client.generate(
+            [
                 types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
                 _TRANSCRIBE_PROMPT,
             ],

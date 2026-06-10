@@ -26,17 +26,11 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from google import genai
 from google.genai import types
 
-from config import settings
+import ai_client
 
 logger = logging.getLogger(__name__)
-
-
-def get_gemini_client() -> genai.Client:
-    """Create a Gemini client from the current settings."""
-    return genai.Client(api_key=settings.GEMINI_API_KEY)
 
 
 # Fixed taxonomy. Keeping categories closed makes reports aggregate cleanly.
@@ -204,14 +198,11 @@ async def extract_transactions(
         return []
 
     today = today or dt.date.today()
-    client = get_gemini_client()
-
     user_content = f"TODAY is {today.isoformat()}.\nText: {text}"
 
     try:
-        response = await client.aio.models.generate_content(
-            model=settings.gemini_model,
-            contents=user_content,
+        response = await ai_client.generate(
+            user_content,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 temperature=0,

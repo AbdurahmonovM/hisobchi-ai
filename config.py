@@ -46,7 +46,7 @@ class Settings(BaseSettings):
 
     # Gemini (default provider).
     GEMINI_API_KEY: str = Field(default="", description="Key from aistudio.google.com/apikey")
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     # Legacy providers (kept for fallback; not used when AI_PROVIDER=gemini).
     GROQ_API_KEY: str = Field(default="", description="Free key from console.groq.com")
@@ -125,7 +125,7 @@ class Settings(BaseSettings):
     @property
     def gemini_model(self) -> str:
         """Gemini model id (handles both audio transcription and NLP)."""
-        return self.GEMINI_MODEL or "gemini-2.0-flash"
+        return self.GEMINI_MODEL or "gemini-2.5-flash"
 
     # --- AI provider resolution (used by speech_service & nlp_service) ---
     @property
