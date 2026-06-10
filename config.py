@@ -40,16 +40,17 @@ class Settings(BaseSettings):
     BOT_MODE: Literal["webhook", "polling"] = "polling"
 
     # --- AI provider (STT + NLP) ---
-    # "groq"   -> FREE: Groq Whisper + Llama (one key from console.groq.com)
-    # "openai" -> paid: OpenAI Whisper + GPT-4o-mini
-    AI_PROVIDER: Literal["groq", "openai"] = "groq"
+    # "gemini" -> Google Gemini (multimodal): hears the voice AND extracts the
+    #             transactions; one key from https://aistudio.google.com/apikey
+    AI_PROVIDER: Literal["gemini", "groq", "openai"] = "gemini"
 
-    # Provide the key for whichever provider you chose. The other can stay empty.
+    # Gemini (default provider).
+    GEMINI_API_KEY: str = Field(default="", description="Key from aistudio.google.com/apikey")
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+
+    # Legacy providers (kept for fallback; not used when AI_PROVIDER=gemini).
     GROQ_API_KEY: str = Field(default="", description="Free key from console.groq.com")
     OPENAI_API_KEY: str = Field(default="", description="OpenAI API key (paid)")
-
-    # Optional model overrides. If left empty, sensible per-provider defaults are
-    # picked by the `whisper_model` / `nlp_model` properties below.
     WHISPER_MODEL: str = ""
     NLP_MODEL: str = ""
 
@@ -113,11 +114,18 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _check_ai_key(self) -> "Settings":
         """Ensure the chosen provider actually has its API key set."""
+        if self.AI_PROVIDER == "gemini" and not self.GEMINI_API_KEY:
+            raise ValueError("AI_PROVIDER=gemini but GEMINI_API_KEY is empty")
         if self.AI_PROVIDER == "groq" and not self.GROQ_API_KEY:
             raise ValueError("AI_PROVIDER=groq but GROQ_API_KEY is empty")
         if self.AI_PROVIDER == "openai" and not self.OPENAI_API_KEY:
             raise ValueError("AI_PROVIDER=openai but OPENAI_API_KEY is empty")
         return self
+
+    @property
+    def gemini_model(self) -> str:
+        """Gemini model id (handles both audio transcription and NLP)."""
+        return self.GEMINI_MODEL or "gemini-2.0-flash"
 
     # --- AI provider resolution (used by speech_service & nlp_service) ---
     @property

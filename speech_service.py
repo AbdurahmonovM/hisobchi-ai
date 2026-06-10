@@ -1,40 +1,39 @@
 """
 speech_service.py
 =================
-Speech-to-text via the OpenAI Whisper API.
+Speech-to-text via Google Gemini (multimodal).
 
-Telegram voice messages arrive as OGG/Opus. Whisper accepts that format
-directly, so we don't need ffmpeg — we just hand the bytes to the API with a
-filename that carries the `.ogg` extension (the API sniffs format from it).
+Telegram voice messages arrive as OGG/Opus. Gemini accepts the audio bytes
+inline (no ffmpeg needed) and transcribes them. We tell Gemini the language is
+Uzbek (often mixed with Russian) and ask for a clean transcript only.
 
-We bias Whisper toward Uzbek with `language="uz"` and a domain `prompt`
-containing finance vocabulary, which measurably improves recognition of
-numbers and money words.
+The transcript is then passed to `nlp_service.extract_transactions`, which can
+pull MULTIPLE income/expense operations out of a single message.
 """
 
 from __future__ import annotations
 
-import io
 import logging
-from typing import Optional
 
-from openai import AsyncOpenAI
+from google import genai
+from google.genai import types
 
 from config import settings
 
 logger = logging.getLogger(__name__)
 
-def get_ai_client() -> AsyncOpenAI:
-    """Lazy-load the OpenAI/Groq client using the latest settings."""
-    return AsyncOpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
+
+def get_gemini_client() -> genai.Client:
+    """Create a Gemini client from the current settings (cheap to construct)."""
+    return genai.Client(api_key=settings.GEMINI_API_KEY)
 
 
-# A short priming prompt nudges Whisper toward finance/number vocabulary and
-# the Uzbek+Russian code-switching it will hear. It is NOT a transcript — just
-# context describing the expected content.
-_WHISPER_PROMPT = (
-    "Moliyaviy xabar. So'm, dollar, ming, million, perevod, naqd, zarplata, "
-    "oylik, taksi, obed, xarajat, kirim, chiqim."
+# Instruction telling Gemini to return a faithful transcript and nothing else.
+_TRANSCRIBE_PROMPT = (
+    "Transcribe this voice message into text EXACTLY as spoken. "
+    "The language is Uzbek, often mixed with Russian financial slang "
+    "(so'm, ming, million, perevod, naqd, zarplata, taksi, obed...). "
+    "Return ONLY the transcript text — no translation, no commentary, no quotes."
 )
 
 
@@ -42,16 +41,15 @@ class TranscriptionError(Exception):
     """Raised when audio could not be transcribed into usable text."""
 
 
-async def transcribe_voice(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
-    """Transcribe raw voice bytes (OGG/Opus from Telegram) to Uzbek text.
+async def transcribe_voice(audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
+    """Transcribe raw Telegram voice bytes (OGG/Opus) to Uzbek text via Gemini.
 
     Parameters
     ----------
     audio_bytes:
         The downloaded voice message content.
-    filename:
-        Name passed to the API so it can infer the container format. The
-        extension matters more than the stem.
+    mime_type:
+        MIME type of the audio. Telegram voice notes are "audio/ogg".
 
     Returns
     -------
@@ -61,29 +59,26 @@ async def transcribe_voice(audio_bytes: bytes, filename: str = "voice.ogg") -> s
     Raises
     ------
     TranscriptionError
-        If the API fails or returns empty/blank text.
+        If Gemini fails or returns empty/blank text.
     """
     if not audio_bytes:
         raise TranscriptionError("Empty audio payload")
 
-    # Whisper's SDK expects a file-like object with a `.name` attribute.
-    buffer = io.BytesIO(audio_bytes)
-    buffer.name = filename
-
+    client = get_gemini_client()
     try:
-        client = get_ai_client()
-        result = await client.audio.transcriptions.create(
-            model=settings.whisper_model,
-            file=buffer,
-            language="uz",            # bias toward Uzbek
-            prompt=_WHISPER_PROMPT,   # finance-domain priming
-            temperature=0,
+        response = await client.aio.models.generate_content(
+            model=settings.gemini_model,
+            contents=[
+                types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                _TRANSCRIBE_PROMPT,
+            ],
+            config=types.GenerateContentConfig(temperature=0),
         )
     except Exception as exc:  # noqa: BLE001 - convert any API error to our type
-        logger.exception("Whisper transcription failed")
+        logger.exception("Gemini transcription failed")
         raise TranscriptionError("Speech recognition service failed") from exc
 
-    text: Optional[str] = (result.text or "").strip()
+    text = (response.text or "").strip()
     if not text:
         raise TranscriptionError("Audio produced no recognisable text")
 

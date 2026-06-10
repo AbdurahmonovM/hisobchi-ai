@@ -72,8 +72,8 @@ async def _run_bot() -> None:
 async def lifespan(_: FastAPI):
     """Init DB and launch the bot in the background. Never crash on errors."""
     logger.info(
-        "Starting Hisobchi AI | provider=%s | nlp=%s | stt=%s",
-        settings.AI_PROVIDER, settings.nlp_model, settings.whisper_model,
+        "Starting Hisobchi AI | provider=%s | model=%s",
+        settings.AI_PROVIDER, settings.gemini_model,
     )
 
     try:

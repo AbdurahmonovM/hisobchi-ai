@@ -12,9 +12,9 @@ aiosqlite==0.20.0          # async SQLite driver (dev default)
 asyncpg==0.30.0            # async PostgreSQL driver (prod; has Python 3.13 wheels)
 
 # ---- AI / LLM ----
-# The openai SDK talks to BOTH OpenAI and Groq (Groq is OpenAI-API-compatible),
-# so the same client works for the free Groq Whisper + Llama setup.
-openai==1.51.0
+# Google Gemini (multimodal): transcribes the voice AND extracts transactions.
+# One model handles audio + multi-transaction NLP.
+google-genai>=1.0.0
 
 # ---- Settings & validation ----
 pydantic==2.9.2

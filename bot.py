@@ -47,7 +47,7 @@ from database import (
     set_monthly_income,
     update_user_profile,
 )
-from nlp_service import extract_transaction, parse_uzbek_amount
+from nlp_service import extract_transactions, parse_uzbek_amount
 from speech_service import TranscriptionError, transcribe_voice
 
 logging.basicConfig(
@@ -96,6 +96,22 @@ def _web_app_keyboard() -> InlineKeyboardMarkup | None:
 def _fmt_money(amount, currency: str = settings.DEFAULT_CURRENCY) -> str:
     """Format a Decimal/number with thousands separators, e.g. '50 000 UZS'."""
     return f"{amount:,.0f}".replace(",", " ") + f" {currency}"
+
+
+def _format_saved(transactions, balance) -> str:
+    """Build a confirmation message listing one OR many saved transactions."""
+    n = len(transactions)
+    header = "✅ <b>Saqlandi!</b>" if n == 1 else f"✅ <b>{n} ta amal saqlandi!</b>"
+    lines = [header, ""]
+    for t in transactions:
+        emoji = _TYPE_EMOJI.get(t.type, "•")
+        sign = "+" if t.type == "income" else ("−" if t.type == "expense" else "")
+        lines.append(
+            f"{emoji} {sign}{_fmt_money(t.amount)} — {t.description} ({t.category})"
+        )
+    lines.append("")
+    lines.append(f"💰 Yangi balans: <b>{_fmt_money(balance)}</b>")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -305,9 +321,9 @@ async def handle_voice(message: Message, bot: Bot) -> None:
 
     await status.edit_text(f"📝 <i>«{text}»</i>\n\n🤖 Tahlil qilyapman...")
 
-    # 3) NLP entity extraction.
-    parsed = await extract_transaction(text)
-    if parsed is None:
+    # 3) NLP entity extraction — may return SEVERAL transactions from one message.
+    transactions = await extract_transactions(text)
+    if not transactions:
         await status.edit_text(
             f"📝 <i>«{text}»</i>\n\n"
             "❓ Bu yerda moliyaviy ma'lumot topilmadi. "
@@ -315,7 +331,7 @@ async def handle_voice(message: Message, bot: Bot) -> None:
         )
         return
 
-    # 4) Persist.
+    # 4) Persist every detected transaction.
     async with AsyncSessionLocal() as session:
         await get_or_create_user(
             session,
@@ -324,28 +340,22 @@ async def handle_voice(message: Message, bot: Bot) -> None:
             full_name=message.from_user.full_name,
             language_code=message.from_user.language_code,
         )
-        await add_transaction(
-            session,
-            user_id=message.from_user.id,
-            amount=parsed.amount,
-            tx_type=parsed.type,
-            category=parsed.category,
-            description=parsed.description,
-            tx_date=parsed.date,
-            raw_text=text,
-        )
+        for parsed in transactions:
+            await add_transaction(
+                session,
+                user_id=message.from_user.id,
+                amount=parsed.amount,
+                tx_type=parsed.type,
+                category=parsed.category,
+                description=parsed.description,
+                tx_date=parsed.date,
+                raw_text=text,
+            )
         balance = await get_balance(session, message.from_user.id)
 
-    # 5) Confirm.
-    emoji = _TYPE_EMOJI.get(parsed.type, "•")
+    # 5) Confirm (lists all saved operations).
     await status.edit_text(
-        f"{emoji} <b>Saqlandi!</b>\n\n"
-        f"Summa: <b>{_fmt_money(parsed.amount)}</b>\n"
-        f"Turi: {parsed.type}\n"
-        f"Kategoriya: {parsed.category}\n"
-        f"Izoh: {parsed.description}\n"
-        f"Sana: {parsed.date.isoformat()}\n\n"
-        f"💰 Yangi balans: <b>{_fmt_money(balance)}</b>",
+        _format_saved(transactions, balance),
         reply_markup=_web_app_keyboard(),
     )
 
@@ -364,8 +374,8 @@ async def handle_text(message: Message) -> None:
             await message.answer("Boshlash uchun /start ni bosing 🙏")
             return
 
-    parsed = await extract_transaction(message.text)
-    if parsed is None:
+    transactions = await extract_transactions(message.text)
+    if not transactions:
         await message.answer(
             "❓ Tushunmadim. Ovozli xabar yuboring yoki «taksiga 20 ming» "
             "kabi yozing."
@@ -379,22 +389,21 @@ async def handle_text(message: Message) -> None:
             username=message.from_user.username,
             full_name=message.from_user.full_name,
         )
-        await add_transaction(
-            session,
-            user_id=message.from_user.id,
-            amount=parsed.amount,
-            tx_type=parsed.type,
-            category=parsed.category,
-            description=parsed.description,
-            tx_date=parsed.date,
-            raw_text=message.text,
-        )
+        for parsed in transactions:
+            await add_transaction(
+                session,
+                user_id=message.from_user.id,
+                amount=parsed.amount,
+                tx_type=parsed.type,
+                category=parsed.category,
+                description=parsed.description,
+                tx_date=parsed.date,
+                raw_text=message.text,
+            )
         balance = await get_balance(session, message.from_user.id)
 
-    emoji = _TYPE_EMOJI.get(parsed.type, "•")
     await message.answer(
-        f"{emoji} Saqlandi: <b>{_fmt_money(parsed.amount)}</b> "
-        f"({parsed.category})\n💰 Balans: <b>{_fmt_money(balance)}</b>",
+        _format_saved(transactions, balance),
         reply_markup=_web_app_keyboard(),
     )
 

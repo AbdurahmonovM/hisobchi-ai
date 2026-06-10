@@ -1,25 +1,19 @@
 """
 nlp_service.py
 ==============
-Turns free-form Uzbek / mixed Uzbek-Russian text into a structured financial
-transaction using an LLM with strict JSON output.
+Turns free-form Uzbek / mixed Uzbek-Russian text into a LIST of structured
+financial transactions using Google Gemini with strict JSON output.
 
-The hard part of this project is NOT the API call — it is the *prompt*. Uzbek
-financial speech is highly colloquial and code-switches with Russian:
+Key capability: a SINGLE message may describe SEVERAL operations, e.g.
+    "zarplata 5 million tushdi, obedga 35 ming ketdi, internetga 200 ming"
+    -> [income 5 000 000 salary, expense 35 000 food, expense 200 000 bills]
 
-    "50 ming so'm perevod qildim"      -> transfer, 50 000
-    "naqd 100 dollar keldi"            -> income, 100 (USD)
-    "obed uchun 35 ming ketdi"         -> expense, 35 000, category=food
-    "taksi 20 ming"                    -> expense, 20 000, category=transport
-    "zarplata 5 million tushdi"        -> income, 5 000 000, category=salary
-
-We therefore give the model:
-  * A precise role + output contract (JSON only).
+We give the model:
+  * A precise role + output contract (JSON object with a "transactions" array).
   * A normalisation guide for Uzbek/Russian number words ("ming"=1e3,
     "million"/"mln"=1e6, "milliard"=1e9).
   * A fixed category taxonomy so the pie chart stays consistent.
-  * Few-shot examples covering the tricky code-switching cases.
-  * `response_format={"type": "json_object"}` to force valid JSON.
+  * `response_mime_type="application/json"` to force valid JSON.
 """
 
 from __future__ import annotations
@@ -32,15 +26,18 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from openai import AsyncOpenAI
+from google import genai
+from google.genai import types
 
 from config import settings
 
 logger = logging.getLogger(__name__)
 
-def get_ai_client() -> AsyncOpenAI:
-    """Lazy-load the OpenAI/Groq client using the latest settings."""
-    return AsyncOpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
+
+def get_gemini_client() -> genai.Client:
+    """Create a Gemini client from the current settings."""
+    return genai.Client(api_key=settings.GEMINI_API_KEY)
+
 
 # Fixed taxonomy. Keeping categories closed makes reports aggregate cleanly.
 CATEGORIES = [
@@ -98,7 +95,7 @@ def parse_uzbek_amount(text: str) -> Optional[Decimal]:
 
 @dataclass(slots=True)
 class ParsedTransaction:
-    """Validated, normalised result of NLP extraction."""
+    """Validated, normalised single transaction extracted from text/voice."""
 
     amount: Decimal
     type: str  # "income" | "expense" | "transfer"
@@ -108,110 +105,60 @@ class ParsedTransaction:
     confidence: float  # 0..1, how sure the model is that this is a transaction
 
 
+# The system instruction. Note the emphasis on MULTIPLE transactions per message.
 SYSTEM_PROMPT = """\
 You are a financial entity-extraction engine for an Uzbek personal-finance app.
-The user speaks Uzbek, often mixed with Russian slang. Your ONLY job is to read
-the text and return a single JSON object describing the financial transaction.
+The user speaks Uzbek, often mixed with Russian slang. A single message may
+contain SEVERAL financial operations. Your job: read the text and return a JSON
+object listing EVERY transaction you find.
 
-Return JSON with EXACTLY these keys:
+Return EXACTLY this shape:
 {
-  "amount": <number>,                 // positive number in base units (so'm/dollar as a plain number)
-  "type": "income" | "expense" | "transfer",
-  "category": one of [food, transport, shopping, bills, health, education,
-                      entertainment, salary, transfer, other],
-  "description": "<short human description in Uzbek>",
-  "date": "YYYY-MM-DD",               // resolve relative dates using TODAY given below
-  "confidence": <number 0..1>          // 0 if the text is not about money at all
+  "transactions": [
+    {
+      "amount": <number>,                // positive plain number (no currency words)
+      "type": "income" | "expense" | "transfer",
+      "category": one of [food, transport, shopping, bills, health, education,
+                          entertainment, salary, transfer, other],
+      "description": "<short description in Uzbek>",
+      "date": "YYYY-MM-DD",              // resolve relative dates using TODAY below
+      "confidence": <number 0..1>
+    }
+    // ... one object PER operation; could be 0, 1, or many
+  ]
 }
 
-NUMBER NORMALISATION (critical):
-- "ming" / "тысяча" = x1000.            e.g. "50 ming" -> 50000
-- "million" / "mln" / "млн" = x1000000. e.g. "5 million" -> 5000000
+CRITICAL — MULTIPLE OPERATIONS:
+The user often lists several things at once, separated by commas, "va", "keyin",
+or just spoken in sequence. Split them into SEPARATE transaction objects.
+Example: "zarplata 5 million tushdi, obedga 35 ming, internetga 200 ming to'ladim"
+-> THREE objects: income 5000000 salary; expense 35000 food; expense 200000 bills.
+
+NUMBER NORMALISATION:
+- "ming" / "тысяча" = x1000.            "50 ming" -> 50000
+- "million" / "mln" / "млн" = x1000000. "5 million" -> 5000000
 - "milliard" / "mlrd" = x1000000000.
-- "yarim" = 0.5 (e.g. "yarim million" -> 500000).
+- "yarim" = 0.5 ("yarim million" -> 500000).
 - Plain digits stay as-is. Strip currency words from the number.
 
-TYPE / DIRECTION clues (Uzbek + Russian):
-- INCOME  (money in):  keldi, tushdi, oldim, kirdi, zarplata/oylik/maosh,
-                       prishlo, poluchil.
-- EXPENSE (money out): ketdi, sarfladim, to'ladim, oldim (sotib oldim), xarajat,
-                       potratil, zaplatil, obed/taksi/magazin.
-- TRANSFER:            perevod, o'tkazdim, o'tkazma, otpravil, kartaga tashladim.
-  NOTE: a transfer is moving your own money; if it is clearly a payment for
-  goods/services treat it as expense instead.
+TYPE / DIRECTION (Uzbek + Russian):
+- INCOME  (money in):  keldi, tushdi, oldim, kirdi, zarplata/oylik/maosh, prishlo, poluchil.
+- EXPENSE (money out): ketdi, sarfladim, to'ladim, sotib oldim, xarajat, potratil, zaplatil.
+- TRANSFER:            perevod, o'tkazdim, o'tkazma, otpravil. (Payment for goods = expense.)
 
 CATEGORY hints: taksi/benzin->transport, obed/ovqat/restoran->food,
 kommunal/internet/ijara->bills, dori/apteka->health, oylik/zarplata->salary,
 perevod->transfer, kiyim/bozor->shopping, kino/dam->entertainment.
 
-DATE: "bugun"/today -> TODAY. "kecha"/yesterday -> TODAY-1. "ertaga" -> TODAY+1.
-If no date is mentioned, use TODAY.
+DATE: "bugun"->TODAY, "kecha"->TODAY-1, "ertaga"->TODAY+1. No date -> TODAY.
 
-If the message is NOT a financial transaction, return all zeros/empty with
-"confidence": 0. Respond with JSON ONLY — no prose, no markdown fences.
+If the message has NO financial operations, return {"transactions": []}.
+Respond with JSON ONLY — no prose, no markdown fences.
 """
-
-# Few-shot examples steer the model on the code-switching edge cases.
-FEW_SHOTS = [
-    (
-        "50 ming so'm perevod qildim",
-        {
-            "amount": 50000, "type": "transfer", "category": "transfer",
-            "description": "Perevod qilindi", "confidence": 0.95,
-        },
-    ),
-    (
-        "naqd 100 dollar keldi",
-        {
-            "amount": 100, "type": "income", "category": "other",
-            "description": "Naqd 100 dollar kirim", "confidence": 0.9,
-        },
-    ),
-    (
-        "obed uchun 35 ming ketdi",
-        {
-            "amount": 35000, "type": "expense", "category": "food",
-            "description": "Tushlik (obed)", "confidence": 0.96,
-        },
-    ),
-    (
-        "zarplata 5 million tushdi",
-        {
-            "amount": 5000000, "type": "income", "category": "salary",
-            "description": "Oylik tushdi", "confidence": 0.97,
-        },
-    ),
-    (
-        "taksiga 20 ming",
-        {
-            "amount": 20000, "type": "expense", "category": "transport",
-            "description": "Taksi", "confidence": 0.93,
-        },
-    ),
-]
-
-
-def _build_messages(text: str, today: dt.date) -> list[dict]:
-    """Assemble the chat messages: system prompt + few-shots + user text."""
-    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-    for example_text, example_json in FEW_SHOTS:
-        # Inject TODAY into each example so the model learns date resolution.
-        payload = {**example_json, "date": today.isoformat()}
-        messages.append({"role": "user", "content": example_text})
-        messages.append({"role": "assistant", "content": json.dumps(payload, ensure_ascii=False)})
-
-    messages.append(
-        {"role": "user", "content": f"TODAY is {today.isoformat()}.\nText: {text}"}
-    )
-    return messages
 
 
 def _coerce(data: dict, today: dt.date) -> Optional[ParsedTransaction]:
-    """Validate + normalise the raw LLM dict into a ParsedTransaction.
-
-    Returns None if the payload doesn't describe a usable transaction.
-    """
+    """Validate + normalise one raw item into a ParsedTransaction, or None."""
     try:
         amount = Decimal(str(data.get("amount", 0)))
     except (InvalidOperation, TypeError):
@@ -219,7 +166,7 @@ def _coerce(data: dict, today: dt.date) -> Optional[ParsedTransaction]:
 
     confidence = float(data.get("confidence", 0) or 0)
     if amount <= 0 or confidence <= 0:
-        return None  # not a (usable) transaction
+        return None  # not a usable transaction
 
     tx_type = str(data.get("type", "expense")).lower()
     if tx_type not in {"income", "expense", "transfer"}:
@@ -229,7 +176,6 @@ def _coerce(data: dict, today: dt.date) -> Optional[ParsedTransaction]:
     if category not in CATEGORIES:
         category = "other"
 
-    # Parse the date defensively, falling back to today.
     raw_date = str(data.get("date", "")) or today.isoformat()
     try:
         parsed_date = dt.date.fromisoformat(raw_date)
@@ -246,36 +192,48 @@ def _coerce(data: dict, today: dt.date) -> Optional[ParsedTransaction]:
     )
 
 
-async def extract_transaction(
+async def extract_transactions(
     text: str, today: Optional[dt.date] = None
-) -> Optional[ParsedTransaction]:
-    """Extract a structured transaction from Uzbek/mixed text.
+) -> list[ParsedTransaction]:
+    """Extract ALL transactions from Uzbek/mixed text using Gemini.
 
-    Returns a `ParsedTransaction` on success, or `None` when the text is not a
-    financial statement (or the model is not confident).
+    Returns a list (possibly empty). One spoken message can yield many items.
     """
     text = (text or "").strip()
     if not text:
-        return None
+        return []
 
     today = today or dt.date.today()
+    client = get_gemini_client()
+
+    user_content = f"TODAY is {today.isoformat()}.\nText: {text}"
 
     try:
-        client = get_ai_client()
-        response = await client.chat.completions.create(
-            model=settings.nlp_model,
-            messages=_build_messages(text, today),
-            temperature=0,  # deterministic extraction
-            response_format={"type": "json_object"},  # force valid JSON
-            max_tokens=300,
+        response = await client.aio.models.generate_content(
+            model=settings.gemini_model,
+            contents=user_content,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                temperature=0,
+                response_mime_type="application/json",
+            ),
         )
-        content = response.choices[0].message.content or "{}"
-        data = json.loads(content)
+        data = json.loads(response.text or "{}")
     except json.JSONDecodeError:
-        logger.warning("NLP returned non-JSON for text=%r", text)
-        return None
-    except Exception:  # network / API errors — surface as "couldn't parse"
-        logger.exception("NLP extraction failed for text=%r", text)
-        return None
+        logger.warning("Gemini returned non-JSON for text=%r", text)
+        return []
+    except Exception:
+        logger.exception("Gemini extraction failed for text=%r", text)
+        return []
 
-    return _coerce(data, today)
+    items = data.get("transactions", []) if isinstance(data, dict) else []
+    if not isinstance(items, list):
+        return []
+
+    result: list[ParsedTransaction] = []
+    for item in items:
+        if isinstance(item, dict):
+            parsed = _coerce(item, today)
+            if parsed is not None:
+                result.append(parsed)
+    return result
